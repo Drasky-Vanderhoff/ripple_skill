@@ -4,7 +4,6 @@ Ripple skill project based on Ripple's `llms.txt` reference, with Bun-first work
 
 ## Repository Conventions
 
-- Default branch: `main` (not `master`)
 - Package manager/runtime commands: Bun/Bunx
 
 ## Contents
