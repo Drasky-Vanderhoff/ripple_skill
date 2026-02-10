@@ -1,0 +1,317 @@
+import { effect, tick, track } from "ripple";
+import type { Component } from "ripple";
+
+type Todo = {
+  id: number;
+  text: string;
+  done: boolean;
+};
+
+type Filter = "all" | "active" | "completed";
+type ListTag = "section" | "article";
+type Theme = "light" | "dark";
+
+const STORAGE_KEY = "ripple-vite-todo-example";
+const THEME_KEY = "ripple-vite-theme";
+
+function loadTheme(): Theme {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "light" || stored === "dark") {
+      return stored;
+    }
+  } catch {
+    // Ignore storage errors and fallback to media query.
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function loadTodos(): Todo[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return [
+        { id: 1, text: "Learn Ripple syntax", done: false },
+        { id: 2, text: "Build with Vite + Bun", done: true }
+      ];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((item) => {
+      return (
+        typeof item?.id === "number" &&
+        typeof item?.text === "string" &&
+        typeof item?.done === "boolean"
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+component Panel({ title, subtitle, children }: { title: string; subtitle: string; children: Component }) {
+  <section class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white/85 shadow-soft backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/85">
+    <header class="border-b border-slate-200/70 bg-gradient-to-br from-slate-50 to-white px-5 py-4 md:px-6 dark:border-slate-700/80 dark:from-slate-900 dark:to-slate-900">
+      <h2 class="font-['Space_Grotesk'] text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{title}</h2>
+      <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">{subtitle}</p>
+    </header>
+    <div class="p-5 md:p-6">
+      <children />
+    </div>
+  </section>
+}
+
+component FilterButton(props: {
+  value: Filter;
+  current: Filter;
+  label: string;
+  onChoose: (value: Filter) => void;
+}) {
+  <button
+    class={props.current === props.value
+      ? "rounded-full border border-sky-200 bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-500 dark:border-sky-400/40 dark:bg-sky-500 dark:hover:bg-sky-400"
+      : "rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800"}
+    onClick={() => props.onChoose(props.value)}
+    type="button"
+  >
+    {props.label}
+  </button>
+}
+
+component TodoRow(props: {
+  todo: Todo;
+  index: number;
+  onToggle: (id: number) => void;
+  onRemove: (id: number) => void;
+}) {
+  <li
+    class={props.todo.done
+      ? "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/80 px-3 py-2.5 md:px-4 dark:border-emerald-800/50 dark:bg-emerald-950/35"
+      : "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 md:px-4 dark:border-slate-700 dark:bg-slate-900/70"}
+  >
+    <label class="flex min-w-0 items-center gap-3">
+      <input
+        checked={props.todo.done}
+        class="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 dark:border-slate-600 dark:bg-slate-900 dark:text-sky-500"
+        onChange={() => props.onToggle(props.todo.id)}
+        type="checkbox"
+      />
+      <span
+        class={props.todo.done
+          ? "truncate text-sm text-slate-500 line-through md:text-base dark:text-slate-400"
+          : "truncate text-sm text-slate-800 md:text-base dark:text-slate-100"}
+      >
+        {props.todo.text}
+      </span>
+    </label>
+    <small class="font-mono text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400">
+      {"#"}{props.index + 1}
+    </small>
+    <button
+      class="rounded-lg border border-rose-200 bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-200 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/60"
+      onClick={() => props.onRemove(props.todo.id)}
+      type="button"
+    >
+      {"Delete"}
+    </button>
+  </li>
+}
+
+export component App() {
+  let todos = track(loadTodos());
+  let draft = track("");
+  let filter = track("all" as Filter);
+  let theme = track(loadTheme());
+  let listTag = track("section" as ListTag);
+  let inputEl = track<HTMLInputElement | undefined>(undefined);
+
+  let nextId = track(() => @todos.reduce((max, item) => Math.max(max, item.id), 0) + 1);
+  let visibleTodos = track(() => {
+    if (@filter === "active") {
+      return @todos.filter((item) => !item.done);
+    }
+    if (@filter === "completed") {
+      return @todos.filter((item) => item.done);
+    }
+    return @todos;
+  });
+  let remaining = track(() => @todos.filter((item) => !item.done).length);
+  let completed = track(() => @todos.length - @remaining);
+
+  effect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(@todos));
+  });
+
+  effect(() => {
+    document.documentElement.classList.toggle("dark", @theme === "dark");
+    document.documentElement.style.colorScheme = @theme;
+    localStorage.setItem(THEME_KEY, @theme);
+  });
+
+  const inputRef = (node: HTMLInputElement) => {
+    @inputEl = node;
+    return () => {
+      @inputEl = undefined;
+    };
+  };
+
+  function addTodo() {
+    const text = @draft.trim();
+    if (!text) {
+      return;
+    }
+
+    @todos = [...@todos, { id: @nextId, text, done: false }];
+    @draft = "";
+    tick().then(() => @inputEl?.focus());
+  }
+
+  function toggleTodo(id: number) {
+    @todos = @todos.map((item) => item.id === id ? { ...item, done: !item.done } : item);
+  }
+
+  function removeTodo(id: number) {
+    @todos = @todos.filter((item) => item.id !== id);
+  }
+
+  function clearCompleted() {
+    @todos = @todos.filter((item) => !item.done);
+  }
+
+  function markAllDone() {
+    @todos = @todos.map((item) => ({ ...item, done: true }));
+  }
+
+  function toggleListTag() {
+    @listTag = @listTag === "section" ? "article" : "section";
+  }
+
+  function toggleTheme() {
+    @theme = @theme === "dark" ? "light" : "dark";
+  }
+
+  <main class="mx-auto grid min-h-screen w-full max-w-5xl gap-6 px-4 py-8 md:px-8 md:py-10">
+    <header class="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 p-6 shadow-soft backdrop-blur md:p-8 dark:border-slate-700/80 dark:bg-slate-900/85">
+      <div class="absolute -right-16 -top-16 h-44 w-44 rounded-full bg-sky-100/70 blur-2xl dark:bg-sky-700/20"></div>
+      <div class="absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-emerald-100/80 blur-2xl dark:bg-emerald-700/20"></div>
+      <div class="relative space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+            {"Ripple + Tailwind + Bun"}
+          </p>
+          <button
+            class="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            onClick={toggleTheme}
+            type="button"
+          >
+            {@theme === "dark" ? "Light mode" : "Dark mode"}
+          </button>
+        </div>
+        <h1 class="font-['Space_Grotesk'] text-3xl font-bold tracking-tight text-ink-950 md:text-4xl dark:text-slate-100">
+          {"Todo Workspace"}
+        </h1>
+        <p class="max-w-3xl text-sm leading-relaxed text-slate-600 md:text-base dark:text-slate-300">
+          {"Includes Ripple reactivity, keyed loops, conditional rendering, refs, localStorage persistence, and a dynamic container element."}
+        </p>
+      </div>
+    </header>
+
+    <div class="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      <Panel subtitle="Create tasks quickly and keep keyboard focus for rapid entry." title="Create Todo">
+        <form
+          class="grid gap-3 sm:grid-cols-[1fr_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            addTodo();
+          }}
+        >
+          <input
+            {ref inputRef}
+            class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-slate-900 shadow-sm outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-400 dark:focus:border-sky-500 dark:focus:ring-sky-900/40"
+            onInput={(event) => @draft = event.target.value}
+            placeholder="What needs to be done?"
+            value={@draft}
+          />
+          <button
+            class="rounded-xl bg-ink-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-sky-600 dark:hover:bg-sky-500"
+            type="submit"
+          >
+            {"Add Todo"}
+          </button>
+        </form>
+      </Panel>
+
+      <Panel subtitle="Switch views and toggle the dynamic list wrapper tag." title="View Options">
+        <div class="space-y-4">
+          <div class="flex flex-wrap gap-2">
+            <FilterButton current={@filter} label="All" onChoose={(value) => @filter = value} value="all" />
+            <FilterButton current={@filter} label="Active" onChoose={(value) => @filter = value} value="active" />
+            <FilterButton current={@filter} label="Completed" onChoose={(value) => @filter = value} value="completed" />
+          </div>
+          <button
+            class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800"
+            onClick={toggleListTag}
+            type="button"
+          >
+            {"Toggle Container Tag ("}{@listTag}{")"}
+          </button>
+        </div>
+      </Panel>
+    </div>
+
+    <@listTag class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-soft backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/85">
+      <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 md:px-6 dark:border-slate-700">
+        <div>
+          <h2 class="font-['Space_Grotesk'] text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">{"Todo List"}</h2>
+          <p class="text-sm text-slate-600 dark:text-slate-400">{"Tracked totals update automatically as state changes."}</p>
+        </div>
+        <div class="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.11em] text-slate-500 dark:text-slate-400">
+          <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 dark:border-slate-700 dark:bg-slate-800">{"Remaining: "}{@remaining}</span>
+          <span class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300">{"Completed: "}{@completed}</span>
+        </div>
+      </header>
+
+      <div class="p-5 md:p-6">
+        if (@visibleTodos.length === 0) {
+          <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center dark:border-slate-700 dark:bg-slate-800/70">
+            <p class="text-sm font-medium text-slate-600 dark:text-slate-300">
+              {@filter === "all" ? "No todos yet. Add your first item above." : "No todos in this filter right now."}
+            </p>
+          </div>
+        } else {
+          <ul class="grid gap-3">
+            for (const todo of @visibleTodos; index i; key todo.id) {
+              <TodoRow index={i} onRemove={removeTodo} onToggle={toggleTodo} todo={todo} />
+            }
+          </ul>
+        }
+      </div>
+
+      <footer class="flex flex-wrap gap-2 border-t border-slate-200 px-5 py-4 md:px-6 dark:border-slate-700">
+        if (@completed > 0) {
+          <button
+            class="rounded-xl border border-amber-200 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-200 dark:border-amber-800/70 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
+            onClick={clearCompleted}
+            type="button"
+          >
+            {"Clear completed"}
+          </button>
+        }
+        if (@remaining > 0) {
+          <button
+            class="rounded-xl border border-emerald-200 bg-emerald-100 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-200 dark:border-emerald-800/70 dark:bg-emerald-950/45 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+            onClick={markAllDone}
+            type="button"
+          >
+            {"Mark all done"}
+          </button>
+        }
+      </footer>
+    </@listTag>
+  </main>
+}

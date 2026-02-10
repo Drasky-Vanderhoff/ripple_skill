@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ripple Bun"
+  short_description: "Ripple framework guidance from llms.txt with bun/bunx commands"
+  default_prompt: "Use the local llms.txt Ripple reference as source of truth and rewrite npm/npx commands to bun/bunx."
